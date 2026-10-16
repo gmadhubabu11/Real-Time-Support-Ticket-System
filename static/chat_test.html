@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><title>Ticket Chat Test</title>
+<style>
+ body{font-family:system-ui,sans-serif;max-width:720px;margin:24px auto;padding:0 12px}
+ input,button{padding:8px;margin:4px 0} input[type=text]{width:100%;box-sizing:border-box}
+ #log{border:1px solid #ccc;height:340px;overflow:auto;padding:8px;background:#fafafa;font-size:14px}
+ .note{color:#a60}.sys{color:#666;font-style:italic}.me{color:#0a5}
+</style>
+</head>
+<body>
+<h2>Ticket Chat Test</h2>
+<input type="text" id="token" placeholder="Access token (from POST /auth/login)">
+<input type="number" id="tid" placeholder="Ticket ID" style="width:140px">
+<button onclick="connect()">Connect</button> <button onclick="disconnect()">Disconnect</button>
+<span id="state">disconnected</span>
+<div id="log"></div>
+<div id="typing" class="sys" style="height:20px"></div>
+<input type="text" id="msg" placeholder="Type a message..." oninput="typing()" onkeydown="if(event.key==='Enter')send()">
+<label><input type="checkbox" id="internal"> Internal note (agents/admin only)</label><br>
+<button onclick="send()">Send</button>
+<script>
+let ws, typingTimer, lastTyping = 0;
+const log = (html, cls='') => { const d=document.createElement('div'); d.className=cls; d.innerHTML=html; 
+  document.getElementById('log').appendChild(d); document.getElementById('log').scrollTop=1e9; };
+const esc = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+function renderMsg(m){ log(`<b>${esc(m.sender_name||m.sender_id)}</b> (${m.sender_role}) ${m.is_internal_note?'[INTERNAL] ':''}: ${esc(m.message)}`, m.is_internal_note?'note':''); }
+function connect(){
+  const token=document.getElementById('token').value.trim(), tid=document.getElementById('tid').value;
+  if(ws) ws.close();
+  const proto = location.protocol==='https:'?'wss':'ws';
+  ws = new WebSocket(`${proto}://${location.host}/ws/tickets/${tid}?token=${encodeURIComponent(token)}`);
+  ws.onopen = () => document.getElementById('state').textContent='connected';
+  ws.onclose = e => { document.getElementById('state').textContent='disconnected'; log(`Connection closed (code ${e.code}${e.reason?': '+esc(e.reason):''})`,'sys'); };
+  ws.onmessage = e => {
+    const d = JSON.parse(e.data);
+    if(d.type==='history'){ log('--- last '+d.messages.length+' messages ---','sys'); d.messages.forEach(renderMsg); }
+    else if(d.type==='message'){ renderMsg(d); document.getElementById('typing').textContent=''; }
+    else if(d.type==='typing'){ document.getElementById('typing').textContent=d.text; clearTimeout(typingTimer); typingTimer=setTimeout(()=>document.getElementById('typing').textContent='',2000); }
+    else if(d.type==='read'){ log('messages read by user #'+d.reader_id,'sys'); }
+    else if(d.type==='error'){ log('Error: '+esc(d.detail),'sys'); }
+  };
+}
+function disconnect(){ if(ws) ws.close(); }
+function send(){
+  const el=document.getElementById('msg'); if(!ws||ws.readyState!==1||!el.value.trim()) return;
+  ws.send(JSON.stringify({message: el.value, is_internal_note: document.getElementById('internal').checked}));
+  el.value='';
+}
+function typing(){ if(ws&&ws.readyState===1&&Date.now()-lastTyping>1000){ lastTyping=Date.now(); ws.send(JSON.stringify({type:'typing'})); } }
+</script>
+</body>
+</html>
